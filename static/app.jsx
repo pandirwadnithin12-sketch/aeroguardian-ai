@@ -338,6 +338,24 @@ const calcDirectionVector = (lat, lon, heading, km = 24) => {
   const projLat = lat + (km / 6371.0) * (180.0 / Math.PI) * Math.cos(headingRad);
   const projLon = lon + ((km / 6371.0) * (180.0 / Math.PI) * Math.sin(headingRad)) / Math.cos(latRad);
   return [[lat, lon], [projLat, projLon]];
+// Safe API fetch helper to prevent JSON parse crashes on HTML/500/offline responses
+const safeFetchJson = async (url, options = {}) => {
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      console.warn(`[AeroGuardian API] ${url} returned status ${res.status}`);
+      return null;
+    }
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      console.warn(`[AeroGuardian API] ${url} returned non-JSON response (${contentType})`);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn(`[AeroGuardian API] Network error fetching ${url}:`, err);
+    return null;
+  }
 };
 
 const RadarMap = ({
@@ -473,20 +491,17 @@ const RadarMap = ({
 
   // 2. Fetch Map API Key from Backend on Mount
   useEffect(() => {
-    fetch("/api/config/map")
-      .then((res) => res.json())
-      .then((cfg) => {
-        if (cfg.active_key) {
-          setMapApiKey(cfg.active_key);
-          setKeyInput(cfg.active_key);
-          setKeyProvider(cfg.provider || "mapbox");
-          setHasApiKey(true);
-          if (mapInstanceRef.current) {
-            setupTileLayers(mapInstanceRef.current, cfg.active_key, cfg.provider || "mapbox");
-          }
+    safeFetchJson("/api/config/map").then((cfg) => {
+      if (cfg && cfg.active_key) {
+        setMapApiKey(cfg.active_key);
+        setKeyInput(cfg.active_key);
+        setKeyProvider(cfg.provider || "mapbox");
+        setHasApiKey(true);
+        if (mapInstanceRef.current) {
+          setupTileLayers(mapInstanceRef.current, cfg.active_key, cfg.provider || "mapbox");
         }
-      })
-      .catch(() => {});
+      }
+    });
   }, [setupTileLayers]);
 
   // 3. Initialize Map Instance and Layer Groups
@@ -563,19 +578,18 @@ const RadarMap = ({
     setSaveStatus(null);
     const keyToSave = clearKey ? "" : keyInput.trim();
     try {
-      const res = await fetch("/api/config/map", {
+      const data = await safeFetchJson("/api/config/map", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: keyToSave, provider: keyProvider }),
       });
-      const data = await res.json();
-      if (data.status === "success") {
+      if (data && data.status === "success") {
         setMapApiKey(keyToSave);
         if (clearKey) setKeyInput("");
         setHasApiKey(Boolean(keyToSave));
         setSaveStatus({
           type: "success",
-          msg: keyToSave ? "Map API Key saved in .env & activated on map!" : "API Key cleared. Using free open basemaps.",
+          msg: keyToSave ? "Map API Key saved & activated on map!" : "API Key cleared. Using free open basemaps.",
         });
         if (mapInstanceRef.current) {
           setupTileLayers(mapInstanceRef.current, keyToSave, keyProvider);
@@ -585,10 +599,13 @@ const RadarMap = ({
           setSaveStatus(null);
         }, 1200);
       } else {
-        setSaveStatus({ type: "error", msg: data.message || "Failed to save API key" });
+        setSaveStatus({
+          type: "error",
+          msg: (data && data.message) || "Failed to update configuration.",
+        });
       }
     } catch (err) {
-      setSaveStatus({ type: "error", msg: "Network error saving API key" });
+      setSaveStatus({ type: "error", msg: String(err) });
     } finally {
       setSavingKey(false);
     }
@@ -1491,43 +1508,51 @@ function App() {
   const fetchData = useCallback(async (force = false) => {
     setLoading(true);
     try {
-      // 1. Telemetry
-      const resAcft = await fetch(`/api/aircraft?region=${region}&refresh=${force}`);
-      const dataAcft = await resAcft.json();
-      setAircraft(dataAcft.aircraft || []);
+      // 1. Try Consolidated Single Master Endpoint First (/api/all)
+      const masterData = await safeFetchJson(`/api/all?region=${encodeURIComponent(region)}&refresh=${force}`);
+      if (masterData && masterData.flight_fleet) {
+        setAircraft(masterData.flight_fleet.aircraft || []);
+        setWeatherStations(masterData.terminal_weather?.stations || []);
+        setAlerts(masterData.alert_summary?.active_alerts || []);
+        if (masterData.alert_summary?.severity_counts) {
+          setAlertCounts(masterData.alert_summary.severity_counts);
+        }
+        setWorkload(masterData.workload_indicator || {});
+        setSituation(masterData.situation_awareness || {});
+        setSystemStatus(masterData.status || {});
 
-      // 2. Weather Overview
-      const resWx = await fetch(`/api/weather/overview`);
-      const dataWx = await resWx.json();
-      setWeatherStations(dataWx.stations || []);
+        if (audioAlerts && masterData.alert_summary?.severity_counts) {
+          const counts = masterData.alert_summary.severity_counts;
+          if ((counts.CRITICAL || 0) > 0 || (counts.HIGH || 0) > 0) {
+            playCautionChime();
+          }
+        }
+      } else {
+        // Fallback: Fetch individual endpoints with safeFetchJson
+        const [dataAcft, dataWx, dataAlerts, dataWl, dataSit, dataStat] = await Promise.all([
+          safeFetchJson(`/api/aircraft?region=${encodeURIComponent(region)}&refresh=${force}`),
+          safeFetchJson(`/api/weather/overview`),
+          safeFetchJson(`/api/alerts?priority=ALL&include_acknowledged=true`),
+          safeFetchJson(`/api/workload`),
+          safeFetchJson(`/api/situation`),
+          safeFetchJson(`/api/status`),
+        ]);
 
-      // 3. Alerts
-      const resAlerts = await fetch(`/api/alerts?priority=ALL&include_acknowledged=true`);
-      const dataAlerts = await resAlerts.json();
-      setAlerts(dataAlerts.alerts || []);
-      if (dataAlerts.counts) setAlertCounts(dataAlerts.counts);
-
-      // Play audio chime if critical/high alert exists
-      if (audioAlerts && dataAlerts.counts && (dataAlerts.counts.CRITICAL > 0 || dataAlerts.counts.HIGH > 0)) {
-        playCautionChime();
+        if (dataAcft && dataAcft.aircraft) setAircraft(dataAcft.aircraft);
+        if (dataWx && dataWx.stations) setWeatherStations(dataWx.stations);
+        if (dataAlerts && dataAlerts.alerts) {
+          setAlerts(dataAlerts.alerts);
+          if (dataAlerts.counts) setAlertCounts(dataAlerts.counts);
+          if (audioAlerts && dataAlerts.counts && ((dataAlerts.counts.CRITICAL || 0) > 0 || (dataAlerts.counts.HIGH || 0) > 0)) {
+            playCautionChime();
+          }
+        }
+        if (dataWl) setWorkload(dataWl);
+        if (dataSit) setSituation(dataSit);
+        if (dataStat) setSystemStatus(dataStat);
       }
-
-      // 4. Workload
-      const resWl = await fetch(`/api/workload`);
-      const dataWl = await resWl.json();
-      setWorkload(dataWl);
-
-      // 5. Situation
-      const resSit = await fetch(`/api/situation`);
-      const dataSit = await resSit.json();
-      setSituation(dataSit);
-
-      // 6. Status
-      const resStat = await fetch(`/api/status`);
-      const dataStat = await resStat.json();
-      setSystemStatus(dataStat);
     } catch (err) {
-      console.error("Data pipeline fetch error:", err);
+      console.warn("Data pipeline fetch error:", err);
     } finally {
       setLoading(false);
       setRefreshCountdown(15);
@@ -1557,9 +1582,10 @@ function App() {
   // Fetch Station Weather when requested
   useEffect(() => {
     if (!selectedWxIcao) return;
-    fetch(`/api/weather/station/${selectedWxIcao}`)
-      .then((r) => r.json())
-      .then((data) => setStationWx(data))
+    safeFetchJson(`/api/weather/station/${selectedWxIcao}`)
+      .then((data) => {
+        if (data) setStationWx(data);
+      })
       .catch((e) => console.error(e));
   }, [selectedWxIcao]);
 
@@ -1569,16 +1595,17 @@ function App() {
       setPlaneDiagnostic(null);
       return;
     }
-    fetch(`/api/aircraft/${selectedPlane.icao24}/diagnostic`)
-      .then((r) => r.json())
-      .then((d) => setPlaneDiagnostic(d))
+    safeFetchJson(`/api/aircraft/${selectedPlane.icao24}/diagnostic`)
+      .then((d) => {
+        if (d) setPlaneDiagnostic(d);
+      })
       .catch((e) => console.error(e));
   }, [selectedPlane]);
 
   // Acknowledge alert handler
   const handleAcknowledge = async (alertId, isAck) => {
     const endpoint = isAck ? `/api/alerts/${alertId}/unacknowledge` : `/api/alerts/${alertId}/acknowledge`;
-    await fetch(endpoint, { method: "POST" });
+    await safeFetchJson(endpoint, { method: "POST" });
     fetchData(false);
   };
 
@@ -1593,13 +1620,16 @@ function App() {
     setChatLoading(true);
 
     try {
-      const res = await fetch("/api/assistant", {
+      const data = await safeFetchJson("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: q }),
       });
-      const data = await res.json();
-      setChatMessages([...newMsgs, { role: "assistant", content: data.response }]);
+      if (data && data.response) {
+        setChatMessages([...newMsgs, { role: "assistant", content: data.response }]);
+      } else {
+        setChatMessages([...newMsgs, { role: "assistant", content: "AeroGuardian AI assistant could not process query at this time." }]);
+      }
     } catch (e) {
       setChatMessages([...newMsgs, { role: "assistant", content: "Error communicating with AI assistant." }]);
     } finally {
@@ -3015,7 +3045,7 @@ function App() {
                   ))}
                 </div>
 
-                <button className="btn-icon" onClick={() => fetch("/api/alerts/clear-acknowledged", { method: "POST" }).then(() => fetchData())}>
+                <button className="btn-icon" onClick={() => safeFetchJson("/api/alerts/clear-acknowledged", { method: "POST" }).then(() => fetchData())}>
                   Clear Acknowledged
                 </button>
               </div>

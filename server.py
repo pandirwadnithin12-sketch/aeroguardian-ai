@@ -302,8 +302,13 @@ async def api_map_config_post(request):
         if not key_written:
             new_lines.append(f"{target_var}={key}\n")
 
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
+        try:
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+        except Exception:
+            # On read-only serverless filesystems (e.g. Vercel), disk writes are not permitted.
+            # In-memory os.environ is already updated above.
+            pass
 
         return JSONResponse({"status": "success", "api_key": key, "provider": provider, "has_api_key": bool(key)})
     except Exception as e:
@@ -673,8 +678,9 @@ async def api_airports(request):
 # Serve index.html for root
 async def serve_index(request):
     root_index = os.path.join(os.path.dirname(__file__), "index.html")
+    public_index = os.path.join(os.path.dirname(__file__), "public", "index.html")
     static_index = os.path.join(os.path.dirname(__file__), "static", "index.html")
-    index_file = root_index if os.path.exists(root_index) else static_index
+    index_file = root_index if os.path.exists(root_index) else (public_index if os.path.exists(public_index) else static_index)
     if os.path.exists(index_file):
         response = FileResponse(index_file)
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -715,13 +721,14 @@ for suffix, handler, methods in base_api_routes:
     routes.append(Route(suffix, handler, methods=methods))
 
 routes.append(Route("/api", api_status, methods=["GET"]))
+routes.append(Route("/api/", api_status, methods=["GET"]))
 routes.append(Route("/api/index.py", api_status, methods=["GET"]))
 routes.append(Route("/", serve_index, methods=["GET"]))
 
-# Ensure static directory exists
+# Mount static directory if it exists on filesystem (local dev mode)
 static_path = os.path.join(os.path.dirname(__file__), "static")
-os.makedirs(static_path, exist_ok=True)
-routes.append(Mount("/static", StaticFiles(directory=static_path), name="static"))
+if os.path.exists(static_path):
+    routes.append(Mount("/static", StaticFiles(directory=static_path), name="static"))
 
 middleware = [
     Middleware(

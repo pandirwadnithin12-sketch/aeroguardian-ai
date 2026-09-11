@@ -4,6 +4,6 @@
   "private": true,
   "description": "AeroGuardian AI - Pilot Workload & Decision Support System",
   "scripts": {
-    "build": "node -e \"console.log('AeroGuardian AI static frontend ready.')\""
+    "build": "node -e \"const fs=require('fs'); if(!fs.existsSync('public')) fs.mkdirSync('public'); if(!fs.existsSync('public/static')) fs.mkdirSync('public/static', {recursive:true}); fs.copyFileSync('index.html', 'public/index.html'); fs.cpSync('static', 'public/static', {recursive:true}); console.log('Static assets synced to public/');\""
   }
 }
