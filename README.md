@@ -130,3 +130,12 @@ Open your browser at:
 ```
 http://localhost:8000
 ```
+
+---
+
+## 🌐 Live Production Deployment
+AeroGuardian AI is deployed on Vercel:
+- **Production URL:** [https://aeroguardian-ai.vercel.app](https://aeroguardian-ai.vercel.app)
+- **API Status:** [https://aeroguardian-ai.vercel.app/api/status](https://aeroguardian-ai.vercel.app/api/status)
+- **Consolidated Master Telemetry:** [https://aeroguardian-ai.vercel.app/api/all](https://aeroguardian-ai.vercel.app/api/all)
+
