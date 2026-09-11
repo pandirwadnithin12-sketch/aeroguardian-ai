@@ -662,8 +662,9 @@ async def api_airports(request):
 
 # Serve index.html for root
 async def serve_index(request):
-    static_dir = os.path.join(os.path.dirname(__file__), "static")
-    index_file = os.path.join(static_dir, "index.html")
+    root_index = os.path.join(os.path.dirname(__file__), "index.html")
+    static_index = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    index_file = root_index if os.path.exists(root_index) else static_index
     if os.path.exists(index_file):
         response = FileResponse(index_file)
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -677,31 +678,35 @@ async def serve_index(request):
 # STARLETTE APPLICATION SETUP
 # ============================================================
 
-routes = [
-    # Consolidated Master Endpoint (All details in one URL)
-    Route("/api/all", api_all, methods=["GET"]),
-    Route("/api/master", api_all, methods=["GET"]),
-
-    # Specific REST API Endpoints
-    Route("/api/status", api_status, methods=["GET"]),
-    Route("/api/aircraft", api_aircraft, methods=["GET"]),
-    Route("/api/aircraft/{icao24}/diagnostic", api_aircraft_diagnostic, methods=["GET"]),
-    Route("/api/weather/overview", api_weather_overview, methods=["GET"]),
-    Route("/api/weather/station/{icao}", api_weather_station, methods=["GET"]),
-    Route("/api/alerts", api_alerts, methods=["GET"]),
-    Route("/api/alerts/{alert_id}/acknowledge", api_alert_acknowledge, methods=["POST"]),
-    Route("/api/alerts/{alert_id}/unacknowledge", api_alert_unacknowledge, methods=["POST"]),
-    Route("/api/alerts/clear-acknowledged", api_alert_clear_acknowledged, methods=["POST"]),
-    Route("/api/workload", api_workload, methods=["GET"]),
-    Route("/api/situation", api_situation, methods=["GET"]),
-    Route("/api/assistant", api_assistant, methods=["POST"]),
-    Route("/api/analytics", api_analytics, methods=["GET"]),
-    Route("/api/config/map", api_map_config_get, methods=["GET"]),
-    Route("/api/config/map", api_map_config_post, methods=["POST"]),
-    Route("/api/airports", api_airports, methods=["GET"]),
-    # Main UI
-    Route("/", serve_index, methods=["GET"]),
+base_api_routes = [
+    ("/all", api_all, ["GET"]),
+    ("/master", api_all, ["GET"]),
+    ("/status", api_status, ["GET"]),
+    ("/aircraft", api_aircraft, ["GET"]),
+    ("/aircraft/{icao24}/diagnostic", api_aircraft_diagnostic, ["GET"]),
+    ("/weather/overview", api_weather_overview, ["GET"]),
+    ("/weather/station/{icao}", api_weather_station, ["GET"]),
+    ("/alerts", api_alerts, ["GET"]),
+    ("/alerts/{alert_id}/acknowledge", api_alert_acknowledge, ["POST"]),
+    ("/alerts/{alert_id}/unacknowledge", api_alert_unacknowledge, ["POST"]),
+    ("/alerts/clear-acknowledged", api_alert_clear_acknowledged, ["POST"]),
+    ("/workload", api_workload, ["GET"]),
+    ("/situation", api_situation, ["GET"]),
+    ("/assistant", api_assistant, ["POST"]),
+    ("/analytics", api_analytics, ["GET"]),
+    ("/config/map", api_map_config_get, ["GET"]),
+    ("/config/map", api_map_config_post, ["POST"]),
+    ("/airports", api_airports, ["GET"]),
 ]
+
+routes = []
+for suffix, handler, methods in base_api_routes:
+    routes.append(Route(f"/api{suffix}", handler, methods=methods))
+    routes.append(Route(suffix, handler, methods=methods))
+
+routes.append(Route("/api", api_status, methods=["GET"]))
+routes.append(Route("/api/index.py", api_status, methods=["GET"]))
+routes.append(Route("/", serve_index, methods=["GET"]))
 
 # Ensure static directory exists
 static_path = os.path.join(os.path.dirname(__file__), "static")
