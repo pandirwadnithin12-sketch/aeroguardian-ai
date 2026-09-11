@@ -214,12 +214,14 @@ def get_map_config_data():
     load_dotenv(override=True)
     mapbox_token = os.getenv("MAPBOX_ACCESS_TOKEN") or os.getenv("MAPBOX_API_KEY") or ""
     maptiler_key = os.getenv("MAPTILER_API_KEY") or ""
+    carto_key = os.getenv("CARTO_API_KEY") or ""
     general_key = os.getenv("MAP_API_KEY") or ""
-    active_key = mapbox_token or general_key or maptiler_key or ""
-    provider = "mapbox" if mapbox_token else ("maptiler" if maptiler_key else ("custom" if general_key else "free_open_basemap"))
+    active_key = mapbox_token or carto_key or maptiler_key or general_key or ""
+    provider = "mapbox" if mapbox_token else ("carto" if carto_key else ("maptiler" if maptiler_key else ("custom" if general_key else "free_open_basemap")))
     return {
         "mapbox_token": mapbox_token,
         "maptiler_key": maptiler_key,
+        "carto_key": carto_key,
         "map_api_key": general_key,
         "active_key": active_key,
         "provider": provider,
@@ -261,11 +263,17 @@ async def api_map_config_post(request):
 
         if provider == "maptiler":
             os.environ["MAPTILER_API_KEY"] = key
+            target_var = "MAPTILER_API_KEY"
+        elif provider == "carto":
+            os.environ["CARTO_API_KEY"] = key
+            target_var = "CARTO_API_KEY"
         elif provider == "custom":
             os.environ["MAP_API_KEY"] = key
+            target_var = "MAP_API_KEY"
         else:
             os.environ["MAPBOX_ACCESS_TOKEN"] = key
             os.environ["MAP_API_KEY"] = key
+            target_var = "MAPBOX_ACCESS_TOKEN"
 
         env_path = os.path.join(os.path.dirname(__file__), ".env")
         lines = []
@@ -273,7 +281,6 @@ async def api_map_config_post(request):
             with open(env_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
 
-        target_var = "MAPBOX_ACCESS_TOKEN" if provider == "mapbox" else ("MAPTILER_API_KEY" if provider == "maptiler" else "MAP_API_KEY")
         key_written = False
         new_lines = []
         for l in lines:
@@ -282,6 +289,9 @@ async def api_map_config_post(request):
                 key_written = True
             elif l.startswith("MAPTILER_API_KEY=") and target_var == "MAPTILER_API_KEY":
                 new_lines.append(f"MAPTILER_API_KEY={key}\n")
+                key_written = True
+            elif l.startswith("CARTO_API_KEY=") and target_var == "CARTO_API_KEY":
+                new_lines.append(f"CARTO_API_KEY={key}\n")
                 key_written = True
             elif l.startswith("MAP_API_KEY=") and target_var == "MAP_API_KEY":
                 new_lines.append(f"MAP_API_KEY={key}\n")

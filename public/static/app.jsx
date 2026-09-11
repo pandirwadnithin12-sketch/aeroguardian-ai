@@ -398,35 +398,48 @@ const RadarMap = ({
 
     baseLayersRef.current = {};
 
-    // Standard Free Open Basemaps
-    const cartoDark = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      subdomains: "abcd",
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-    });
+    // 100% Free Open Basemaps (No API key required, zero watermark)
+    const esriDark = L.layerGroup([
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 16,
+        attribution: "Tiles &copy; Esri",
+      }),
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 16,
+        attribution: "&copy; Esri, DeLorme, NAVTEQ",
+      }),
+    ]);
 
     const osmStandard = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
       attribution: "&copy; OpenStreetMap contributors",
     });
 
-    const esriDark = L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
-      maxZoom: 16,
-      attribution: "Tiles &copy; Esri",
+    const cartoUrl = (apiKey && apiKey.trim())
+      ? `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${apiKey.trim()}`
+      : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+
+    const cartoDark = L.tileLayer(cartoUrl, {
+      subdomains: "abcd",
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
     });
 
     const baseMaps = {
-      "🌙 Dark Aerospace (Carto)": cartoDark,
-      "🗺️ OpenStreetMap": osmStandard,
-      "🛰️ Esri Dark Gray": esriDark,
+      "🌙 Dark Aerospace (Esri Dark - Free)": esriDark,
+      "🗺️ OpenStreetMap (Free)": osmStandard,
+      "🌙 Carto Dark": cartoDark,
     };
 
-    let activeLayer = cartoDark;
+    let activeLayer = esriDark;
 
     // When Map API Key is provided, activate premium vector tiles
     if (apiKey && apiKey.trim()) {
       const cleanKey = apiKey.trim();
-      if (provider === "maptiler" || cleanKey.startsWith("key_")) {
+      if (provider === "carto") {
+        baseMaps["⭐ CARTO Dark (Active Key)"] = cartoDark;
+        activeLayer = cartoDark;
+      } else if (provider === "maptiler" || cleanKey.startsWith("key_")) {
         const maptilerDark = L.tileLayer(`https://api.maptiler.com/maps/dataviz-dark/{z}/{x}/{y}.png?key=${cleanKey}`, {
           maxZoom: 20,
           attribution: "&copy; MapTiler &copy; OpenStreetMap contributors",
@@ -1239,14 +1252,14 @@ const RadarMap = ({
             </div>
 
             <p style={{ fontSize: "12px", color: "var(--text-muted)", lineHeight: 1.6, marginBottom: "16px" }}>
-              Enter your <b>Mapbox Access Token</b>, <b>MapTiler Key</b>, or custom vector tile key below.
-              The key is saved into your <code>.env</code> file and immediately activates high-definition vector map layers.
+              AeroGuardian AI operates with <b>100% free Esri Dark Aerospace tiles (no key needed)</b>. To enable CARTO Dark or vector styling, you can enter a free <b>CARTO Key</b>, <b>Mapbox Token</b>, or <b>MapTiler Key</b> below.
             </p>
 
             {/* Provider Tabs */}
             <div style={{ display: "flex", gap: "8px", marginBottom: "14px" }}>
               {[
-                { id: "mapbox", label: "Mapbox (Default)" },
+                { id: "carto", label: "CARTO (Free Key)" },
+                { id: "mapbox", label: "Mapbox" },
                 { id: "maptiler", label: "MapTiler" },
                 { id: "custom", label: "Custom Key" },
               ].map((p) => (
@@ -1274,13 +1287,15 @@ const RadarMap = ({
             {/* Input Field */}
             <div style={{ marginBottom: "16px" }}>
               <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#94a3b8", marginBottom: "6px" }}>
-                {keyProvider === "mapbox" ? "Mapbox Public Access Token (starts with pk.):" : `${keyProvider.toUpperCase()} API Key:`}
+                {keyProvider === "carto"
+                  ? "CARTO API Key (Free at carto.com/basemaps/apikey):"
+                  : (keyProvider === "mapbox" ? "Mapbox Public Access Token (starts with pk.):" : `${keyProvider.toUpperCase()} API Key:`)}
               </label>
               <input
                 type="text"
                 value={keyInput}
                 onChange={(e) => setKeyInput(e.target.value)}
-                placeholder={keyProvider === "mapbox" ? "pk.eyJ1IjoieW91ci11c2VybmFtZSIsImEiOiJ..." : "Enter your API key..."}
+                placeholder={keyProvider === "carto" ? "Enter free CARTO API key..." : (keyProvider === "mapbox" ? "pk.eyJ1IjoieW91ci11c2VybmFtZSIsImEiOiJ..." : "Enter your API key...")}
                 style={{
                   width: "100%",
                   padding: "10px 12px",
