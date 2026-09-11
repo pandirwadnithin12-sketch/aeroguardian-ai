@@ -338,6 +338,8 @@ const calcDirectionVector = (lat, lon, heading, km = 24) => {
   const projLat = lat + (km / 6371.0) * (180.0 / Math.PI) * Math.cos(headingRad);
   const projLon = lon + ((km / 6371.0) * (180.0 / Math.PI) * Math.sin(headingRad)) / Math.cos(latRad);
   return [[lat, lon], [projLat, projLon]];
+};
+
 // Safe API fetch helper to prevent JSON parse crashes on HTML/500/offline responses
 const safeFetchJson = async (url, options = {}) => {
   try {
