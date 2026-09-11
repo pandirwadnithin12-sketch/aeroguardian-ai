@@ -11,6 +11,7 @@ try:
     # Import Starlette ASGI application from server
     from server import app
 except Exception as exc:
+    init_err = str(exc)
     tb = traceback.format_exc()
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
@@ -21,7 +22,7 @@ except Exception as exc:
             {
                 "status": "error",
                 "message": "AeroGuardian AI API initialization failed on Vercel.",
-                "error": str(exc),
+                "error": init_err,
                 "traceback": tb,
             },
             status_code=500,

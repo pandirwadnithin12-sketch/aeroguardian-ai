@@ -15,6 +15,7 @@ Serves the React Single Page Application on http://localhost:8000
 import os
 import json
 import time
+import urllib.parse
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -739,7 +740,36 @@ middleware = [
     )
 ]
 
-app = Starlette(debug=False, routes=routes, middleware=middleware)
+raw_app = Starlette(debug=False, routes=routes, middleware=middleware)
+
+
+class VercelRouteMiddleware:
+    """
+    ASGI middleware ensuring that Vercel Serverless Function rewrites
+    (destination: /api/index.py?_route=...) preserve and dispatch to the correct
+    sub-route handler (e.g. /api/aircraft, /api/weather/overview, /api/all).
+    """
+
+    def __init__(self, inner_app):
+        self.inner_app = inner_app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            matched_path = headers.get(b"x-matched-path", b"").decode("utf-8")
+            if matched_path and scope["path"] in ("/api/index.py", "/api/index", "/api"):
+                clean_path = matched_path.split("?")[0]
+                scope["path"] = clean_path if clean_path.startswith("/api") else f"/api{clean_path}"
+            else:
+                query_str = scope.get("query_string", b"").decode("utf-8")
+                params = dict(urllib.parse.parse_qsl(query_str))
+                if "_route" in params and scope["path"] in ("/api/index.py", "/api/index", "/api"):
+                    route_val = params["_route"]
+                    scope["path"] = f"/api/{route_val}" if not route_val.startswith("/") else route_val
+        await self.inner_app(scope, receive, send)
+
+
+app = VercelRouteMiddleware(raw_app)
 
 
 if __name__ == "__main__":
